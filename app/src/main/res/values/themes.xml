@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.CloudflareTunnel" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorPrimaryContainer">#4A2A0C</item>
+        <item name="colorOnPrimaryContainer">#FFDCC0</item>
+        <item name="colorSecondary">@color/colorAccent</item>
+        <item name="colorSurface">@color/colorSurface</item>
+        <item name="colorOnSurface">@color/colorText</item>
+        <item name="colorSurfaceVariant">@color/colorSurfaceVariant</item>
+        <item name="colorOutline">@color/colorStroke</item>
+        <item name="android:windowBackground">@color/colorBackground</item>
+        <item name="android:statusBarColor">@color/colorBackground</item>
+        <item name="android:navigationBarColor">@color/colorBackground</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.CloudflareTunnel.Dialog</item>
+    </style>
+
+    <style name="ThemeOverlay.CloudflareTunnel.Dialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorSurface">@color/colorSurfaceVariant</item>
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.CloudflareTunnel.Dialog</item>
+    </style>
+
+    <style name="ShapeAppearance.CloudflareTunnel.Dialog" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">24dp</item>
+    </style>
+
+    <!-- পুরনো কোডের সাথে সামঞ্জস্য -->
+    <style name="DarkDialogTheme" parent="ThemeOverlay.CloudflareTunnel.Dialog" />
+
+    <style name="Widget.CloudflareTunnel.Card" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">@color/colorSurface</item>
+        <item name="strokeColor">@color/colorStroke</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="cardCornerRadius">20dp</item>
+        <item name="cardElevation">0dp</item>
+    </style>
+</resources>

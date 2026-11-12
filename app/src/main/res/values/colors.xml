@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#F6821F</color>
+    <color name="colorPrimaryDark">#C96A14</color>
+    <color name="colorAccent">#38BDF8</color>
+    <color name="colorBackground">#0B0F1A</color>
+    <color name="colorSurface">#131A2B</color>
+    <color name="colorSurfaceVariant">#1B2540</color>
+    <color name="colorStroke">#26324F</color>
+    <color name="colorRunning">#34D399</color>
+    <color name="colorRunningBg">#10281F</color>
+    <color name="colorStopped">#F87171</color>
+    <color name="colorText">#E6EAF5</color>
+    <color name="colorTextSecondary">#8C98B5</color>
+    <color name="colorHint">#5A6685</color>
+    <color name="colorError">#F87171</color>
+    <color name="colorWarning">#FBBF24</color>
+    <color name="colorSuccess">#34D399</color>
+    <color name="colorDebug">#7DD3FC</color>
+    <color name="console_bg">#070A12</color>
+    <color name="white">#FFFFFF</color>
+</resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:id="@+id/action_install_binary" android:title="Install cloudflared" app:showAsAction="never" />
+    <item android:id="@+id/action_update_binary" android:title="Update cloudflared" app:showAsAction="never" />
+    <item android:id="@+id/action_stop_all" android:title="Stop all tunnels" app:showAsAction="never" />
+    <item android:id="@+id/action_share_logs" android:title="Share logs" app:showAsAction="never" />
+    <item android:id="@+id/action_about" android:title="About" app:showAsAction="never" />
+</menu>

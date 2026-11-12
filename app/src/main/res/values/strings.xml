@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Cloudflare Tunnel</string>
+    <string name="start_tunnel">Start Tunnel</string>
+    <string name="stop_tunnel">Stop Tunnel</string>
+    <string name="tunnel_running">Tunnel Running</string>
+    <string name="tunnel_stopped">Tunnel Stopped</string>
+</resources>

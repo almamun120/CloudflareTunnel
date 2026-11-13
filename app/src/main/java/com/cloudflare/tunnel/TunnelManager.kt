@@ -527,9 +527,11 @@ class TunnelManager(private val context: Context) {
     }
 
     private fun getPid(process: Process): Long {
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            return try { process.pid() } catch (e: Throwable) { -1L }
-        }
+        // Process.pid() (API 33+) compile-time এ সবসময় দেখা যায় না — reflection দিয়ে ডাকি
+        try {
+            val m = process.javaClass.getMethod("pid")
+            (m.invoke(process) as? Number)?.let { return it.toLong() }
+        } catch (_: Throwable) { }
         return try {
             val field = process.javaClass.getDeclaredField("pid")
             field.isAccessible = true

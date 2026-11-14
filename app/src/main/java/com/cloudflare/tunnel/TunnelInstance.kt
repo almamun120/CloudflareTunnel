@@ -11,6 +11,7 @@ data class TunnelInstance(
     val config: TunnelConfig,
     var isRunning: Boolean = false,
     var tunnelUrl: String = "",
+    var isConnected: Boolean = false,   // URL পাওয়া / named টানেল কানেকশন রেজিস্টার হয়েছে
     var process: Int = -1, // Process ID for tracking
     val logs: MutableList<LogEntry> = mutableListOf()
 ) : Parcelable {

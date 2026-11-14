@@ -40,6 +40,20 @@
                 android:textStyle="bold" />
 
             <TextView
+                android:id="@+id/tvTunnelType"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_url_chip"
+                android:paddingStart="8dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="2dp"
+                android:textColor="@color/colorAccent"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
                 android:id="@+id/tvTunnelStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -103,6 +117,15 @@
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="QR code"
                 android:src="@drawable/ic_qr"
+                app:tint="@color/colorText" />
+
+            <ImageButton
+                android:id="@+id/btnEditTunnel"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Edit"
+                android:src="@drawable/ic_edit"
                 app:tint="@color/colorText" />
 
             <ImageButton

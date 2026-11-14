@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
+    <!-- লোকাল সার্ভিস (http://localhost) ও Firebase REST-এর জন্য; ইউজার-ইনস্টল করা CA আর বিশ্বাস করা হয় না -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
-            <certificates src="user" />
         </trust-anchors>
     </base-config>
 </network-security-config>

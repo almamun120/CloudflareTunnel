@@ -11,6 +11,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -35,6 +37,9 @@ class TunnelManager(private val context: Context) {
 
     // Store multiple tunnel instances
     private val tunnelInstances = ConcurrentHashMap<String, TunnelInstanceRuntime>()
+
+    // Firebase services for each tunnel
+    private val firebaseServices = ConcurrentHashMap<String, FirebaseService>()
 
     // Persistence
     private val prefs: SharedPreferences by lazy {
@@ -79,6 +84,59 @@ class TunnelManager(private val context: Context) {
     }
 
     // ═══════════════════════════════════════════════════
+    //  FIREBASE INTEGRATION
+    // ═══════════════════════════════════════════════════
+
+    private fun getFirebaseService(instance: TunnelInstance): FirebaseService? {
+        if (!instance.config.hasFirebase() || !instance.config.enableFirebaseSync) {
+            return null
+        }
+
+        return firebaseServices.getOrPut(instance.id) {
+            FirebaseService(
+                instance.config.firebaseDatabaseUrl,
+                instance.config.firebaseApiKey
+            ).apply {
+                setLogCallback { msg -> log(instance.id, msg) }
+            }
+        }
+    }
+
+    private fun syncToFirebase(instance: TunnelInstance, status: String, url: String = "") {
+        val firebase = getFirebaseService(instance) ?: return
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                val data = TunnelFirebaseData(
+                    url = url.ifBlank { instance.tunnelUrl },
+                    name = instance.name,
+                    localPort = instance.config.localPort,
+                    protocol = instance.config.protocol,
+                    status = status,
+                    createdAt = getCurrentTimestamp(),
+                    updatedAt = getCurrentTimestamp(),
+                    isHealthy = instance.isRunning
+                )
+
+                firebase.saveTunnel(instance.id, data)
+
+                if (status == "running" && url.isNotBlank()) {
+                    firebase.addToHistory(data)
+                }
+
+            } catch (e: Exception) {
+                log(instance.id, "[FIREBASE] Sync error: ${e.message}")
+            }
+        }
+    }
+
+    private fun getCurrentTimestamp(): String {
+        return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date())
+    }
+
+    // ═══════════════════════════════════════════════════
     //  PERSISTENCE - ENHANCED WITH RUNNING STATE
     // ═══════════════════════════════════════════════════
 
@@ -89,18 +147,7 @@ class TunnelManager(private val context: Context) {
             val array = JSONArray(json)
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
-                val instance = TunnelInstance(
-                    id = obj.getString("id"),
-                    name = obj.getString("name"),
-                    config = TunnelConfig(
-                        localPort = obj.getInt("port"),
-                        protocol = obj.getString("protocol"),
-                        logLevel = obj.optString("logLevel", "info"),
-                        region = obj.optString("region", "auto"),
-                        enableMetrics = obj.optBoolean("enableMetrics", false),
-                        metricsPort = obj.optInt("metricsPort", 9090)
-                    )
-                )
+                val instance = parseInstance(obj)
                 tunnelInstances[instance.id] = TunnelInstanceRuntime(instance)
             }
             Log.d(TAG, "Loaded ${tunnelInstances.size} saved tunnel(s)")
@@ -111,6 +158,74 @@ class TunnelManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load instances", e)
         }
+    }
+
+    private fun parseInstance(obj: JSONObject): TunnelInstance = TunnelInstance(
+        id = obj.getString("id"),
+        name = obj.getString("name"),
+        config = TunnelConfig(
+            tunnelType = try { TunnelType.valueOf(obj.optString("tunnelType", "QUICK")) } catch (e: Exception) { TunnelType.QUICK },
+            tunnelName = obj.optString("tunnelName", ""),
+            tunnelId = obj.optString("tunnelId", ""),
+            credentialsFile = obj.optString("credentialsFile", ""),
+            localPort = obj.optInt("port", 8080),
+            protocol = obj.optString("protocol", "http"),
+            hostname = obj.optString("hostname", ""),
+            useCustomHostname = obj.optBoolean("useCustomHostname", false),
+            enableHTTPS = obj.optBoolean("enableHTTPS", true),
+            logLevel = obj.optString("logLevel", "info"),
+            region = obj.optString("region", "auto"),
+            enableMetrics = obj.optBoolean("enableMetrics", false),
+            metricsPort = obj.optInt("metricsPort", 9090),
+            firebaseDatabaseUrl = obj.optString("firebaseDatabaseUrl", ""),
+            firebaseApiKey = obj.optString("firebaseApiKey", ""),
+            enableFirebaseSync = obj.optBoolean("enableFirebaseSync", false)
+        )
+    )
+
+    /** সব টানেল কনফিগ JSON হিসেবে (ব্যাকআপের জন্য). includeSecrets=false হলে Firebase API key বাদ যায়। */
+    fun exportConfigJson(includeSecrets: Boolean): String {
+        val src = JSONArray(prefs.getString("instances", "[]") ?: "[]")
+        val out = JSONArray()
+        for (i in 0 until src.length()) {
+            val o = JSONObject(src.getJSONObject(i).toString())
+            if (!includeSecrets) o.put("firebaseApiKey", "")
+            out.put(o)
+        }
+        return JSONObject().put("version", 1).put("tunnels", out).toString(2)
+    }
+
+    /** ব্যাকআপ থেকে টানেল কনফিগ ফেরত আনে (একই id থাকলে আপডেট; চালু টানেল বাদ)। @return কয়টা ইমপোর্ট হলো */
+    fun importConfigJson(json: String): Int {
+        val root = JSONObject(json)
+        val arr = root.optJSONArray("tunnels") ?: return 0
+        var n = 0
+        for (i in 0 until arr.length()) {
+            try {
+                val inst = parseInstance(arr.getJSONObject(i))
+                val existing = tunnelInstances[inst.id]
+                if (existing != null) {
+                    if (existing.instance.isRunning) continue
+                    val c = existing.instance.config
+                    existing.instance.name = inst.name
+                    c.tunnelType = inst.config.tunnelType; c.tunnelName = inst.config.tunnelName
+                    c.tunnelId = inst.config.tunnelId; c.credentialsFile = inst.config.credentialsFile
+                    c.localPort = inst.config.localPort; c.protocol = inst.config.protocol
+                    c.hostname = inst.config.hostname
+                    c.firebaseDatabaseUrl = inst.config.firebaseDatabaseUrl
+                    if (inst.config.firebaseApiKey.isNotBlank()) c.firebaseApiKey = inst.config.firebaseApiKey
+                    c.enableFirebaseSync = inst.config.enableFirebaseSync
+                } else {
+                    tunnelInstances[inst.id] = TunnelInstanceRuntime(inst)
+                }
+                n++
+            } catch (e: Exception) {
+                Log.w(TAG, "skip bad tunnel entry: ${e.message}")
+            }
+        }
+        firebaseServices.clear()
+        saveInstances()
+        return n
     }
 
     private fun loadRunningState() {
@@ -144,6 +259,9 @@ class TunnelManager(private val context: Context) {
                         log(instanceId, "[WARN] Tunnel was running but process died")
                         runtime.instance.isRunning = false
                         runtime.instance.tunnelUrl = ""
+
+                        // Update Firebase
+                        syncToFirebase(runtime.instance, "stopped")
                     }
                 }
             }
@@ -195,12 +313,22 @@ class TunnelManager(private val context: Context) {
                 val obj = JSONObject().apply {
                     put("id", runtime.instance.id)
                     put("name", runtime.instance.name)
+                    put("tunnelType", runtime.instance.config.tunnelType.name)
+                    put("tunnelName", runtime.instance.config.tunnelName)
+                    put("tunnelId", runtime.instance.config.tunnelId)
+                    put("credentialsFile", runtime.instance.config.credentialsFile)
                     put("port", runtime.instance.config.localPort)
                     put("protocol", runtime.instance.config.protocol)
+                    put("hostname", runtime.instance.config.hostname)
+                    put("useCustomHostname", runtime.instance.config.useCustomHostname)
+                    put("enableHTTPS", runtime.instance.config.enableHTTPS)
                     put("logLevel", runtime.instance.config.logLevel)
                     put("region", runtime.instance.config.region)
                     put("enableMetrics", runtime.instance.config.enableMetrics)
                     put("metricsPort", runtime.instance.config.metricsPort)
+                    put("firebaseDatabaseUrl", runtime.instance.config.firebaseDatabaseUrl)
+                    put("firebaseApiKey", runtime.instance.config.firebaseApiKey)
+                    put("enableFirebaseSync", runtime.instance.config.enableFirebaseSync)
                 }
                 array.put(obj)
             }
@@ -239,9 +367,6 @@ class TunnelManager(private val context: Context) {
 
     private fun tryReconnectToProcess(runtime: TunnelInstanceRuntime, pid: Long) {
         try {
-            // We can't directly reconnect to the process streams in Android/Linux
-            // But we can monitor if it's still alive and update UI accordingly
-
             log(runtime.instance.id, "[INFO] Monitoring recovered process")
 
             // Start a monitor job to check if process is still alive
@@ -280,20 +405,63 @@ class TunnelManager(private val context: Context) {
         tunnelInstances[instance.id] = TunnelInstanceRuntime(instance)
         saveInstances()
         log(instance.id, "[INFO] Added tunnel: ${instance.name}")
+
+        // Test Firebase connection if enabled
+        if (instance.config.hasFirebase() && instance.config.enableFirebaseSync) {
+            scope.launch(Dispatchers.IO) {
+                val firebase = getFirebaseService(instance)
+                firebase?.testConnection()
+            }
+        }
     }
 
     fun updateInstance(instance: TunnelInstance) {
-        tunnelInstances[instance.id]?.instance?.let {
-            it.name = instance.name
-            it.config.localPort = instance.config.localPort
-            it.config.protocol = instance.config.protocol
+        val runtime = tunnelInstances[instance.id]
+        if (runtime != null) {
+            val existing = runtime.instance
+            existing.name = instance.name
+            existing.config.tunnelType = instance.config.tunnelType
+            existing.config.tunnelName = instance.config.tunnelName
+            existing.config.tunnelId = instance.config.tunnelId
+            existing.config.hostname = instance.config.hostname
+            existing.config.credentialsFile = instance.config.credentialsFile
+            existing.config.localPort = instance.config.localPort
+            existing.config.protocol = instance.config.protocol
+            existing.config.firebaseDatabaseUrl = instance.config.firebaseDatabaseUrl
+            existing.config.firebaseApiKey = instance.config.firebaseApiKey
+            existing.config.enableFirebaseSync = instance.config.enableFirebaseSync
+            
+            Log.d(TAG, "Updated instance ${instance.id} to port ${instance.config.localPort}")
             saveInstances()
+
+            // Clear old Firebase service and create new one
+            firebaseServices.remove(instance.id)
+
+            // Test new Firebase connection if enabled
+            if (instance.config.hasFirebase() && instance.config.enableFirebaseSync) {
+                scope.launch(Dispatchers.IO) {
+                    val firebase = getFirebaseService(instance)
+                    firebase?.testConnection()
+                }
+            }
         }
     }
 
     fun removeTunnel(instanceId: String) {
+        val instance = tunnelInstances[instanceId]?.instance
+
         stopTunnel(instanceId)
+
+        // Remove from Firebase if configured
+        if (instance != null) {
+            val firebase = getFirebaseService(instance)
+            scope.launch(Dispatchers.IO) {
+                firebase?.deleteTunnel(instanceId)
+            }
+        }
+
         tunnelInstances.remove(instanceId)
+        firebaseServices.remove(instanceId)
         saveInstances()
     }
 
@@ -324,11 +492,24 @@ class TunnelManager(private val context: Context) {
             return false
         }
 
-        instance.tunnelUrl = ""
+        instance.tunnelUrl = if (instance.config.tunnelType == TunnelType.NAMED && instance.config.hostname.isNotBlank()) {
+            val h = instance.config.hostname.trim()
+            if (h.startsWith("http://") || h.startsWith("https://")) h else "https://$h"
+        } else {
+            ""
+        }
         instance.isRunning = false
+        instance.isConnected = false
 
         log(instance.id, "[INFO] Starting tunnel: ${instance.name}")
         log(instance.id, "[INFO] Config: ${instance.config.describe()}")
+
+        if (instance.config.hasFirebase() && instance.config.enableFirebaseSync) {
+            log(instance.id, "[INFO] Firebase sync enabled")
+        }
+
+        // Sync starting status to Firebase
+        syncToFirebase(instance, "starting")
 
         val prefixDir = setupTermuxEnvironment()
         val wrapper = createWrapperScript(instance, prefixDir)
@@ -354,6 +535,8 @@ class TunnelManager(private val context: Context) {
                 output.lines().filter { it.isNotBlank() }.take(20).forEach {
                     log(instance.id, "[ERROR] $it")
                 }
+
+                syncToFirebase(instance, "failed")
                 return false
             } catch (e: IllegalThreadStateException) {
                 // Process is still running - good!
@@ -422,7 +605,10 @@ class TunnelManager(private val context: Context) {
             Log.e(TAG, "Failed to start tunnel ${instance.id}", e)
             log(instance.id, "[ERROR] ${e.message}")
             instance.isRunning = false
+
+            syncToFirebase(instance, "failed")
             saveRunningState()
+
             scope.launch(Dispatchers.Main) {
                 statusCallback?.invoke(instance.id, false)
             }
@@ -451,9 +637,12 @@ class TunnelManager(private val context: Context) {
 
         // UI-স্টেট সাথে সাথে আপডেট — ভারী কাজ নিচে ব্যাকগ্রাউন্ডে
         instance.isRunning = false
+        instance.isConnected = false
         instance.tunnelUrl = ""
         runtime.process = null
         runtime.pid = -1L
+
+        syncToFirebase(instance, "stopped")
         saveRunningState()
 
         scope.launch(Dispatchers.Main) { statusCallback?.invoke(instanceId, false) }
@@ -544,9 +733,78 @@ class TunnelManager(private val context: Context) {
     private fun setupTermuxEnvironment(): File {
         val prefixDir = File(context.filesDir, "usr")
         val tmpDir = File(prefixDir, "tmp")
+        val cfDir = File(context.filesDir, ".cloudflared")
         prefixDir.mkdirs()
         tmpDir.mkdirs()
+        cfDir.mkdirs()
         return prefixDir
+    }
+
+    suspend fun runGenericCommand(cmdArgs: String, onProgress: ((String) -> Unit)? = null): String = withContext(Dispatchers.IO) {
+        val prefixDir = setupTermuxEnvironment()
+        val binaryPath = getBinaryPath()
+        val home = context.filesDir.absolutePath
+        val tmpDir = File(prefixDir, "tmp").absolutePath
+
+        val script = """#!/system/bin/sh
+export PREFIX="${prefixDir.absolutePath}"
+export HOME="$home"
+export TMPDIR="$tmpDir"
+export PATH="/system/bin:/system/xbin"
+export SSL_CERT_DIR="/system/etc/security/cacerts"
+
+cd "$home"
+exec "$binaryPath" $cmdArgs 2>&1
+"""
+        val cmdFile = File(context.filesDir, "last_command.sh")
+        cmdFile.writeText(script)
+        cmdFile.setExecutable(true, false)
+        nativeSetPermissions(cmdFile.absolutePath)
+
+        val fullOutput = StringBuilder()
+        try {
+            val pb = ProcessBuilder("/system/bin/sh", cmdFile.absolutePath).apply {
+                environment()["HOME"] = home
+                environment()["TMPDIR"] = tmpDir
+                environment()["PREFIX"] = prefixDir.absolutePath
+                redirectErrorStream(true)
+            }
+            val process = pb.start()
+            
+            val reader = process.inputStream.bufferedReader()
+            val startTime = System.currentTimeMillis()
+            
+            while (true) {
+                if (reader.ready()) {
+                    val line = reader.readLine() ?: break
+                    fullOutput.append(line).append("\n")
+                    onProgress?.invoke(line)
+                    log("SYSTEM", "[CMD] $line")
+                } else {
+                    try {
+                        process.exitValue()
+                        break
+                    } catch (e: IllegalThreadStateException) {
+                        delay(200)
+                    }
+                }
+                
+                // Allow login command to run longer
+                val timeout = if (cmdArgs.contains("login")) 120000L else 45000L
+                if (System.currentTimeMillis() - startTime > timeout) {
+                    process.destroy()
+                    fullOutput.append("\n[TIMEOUT] Command terminated.")
+                    break
+                }
+            }
+            
+            fullOutput.toString().ifBlank { "Command executed with no output" }
+        } catch (e: Exception) {
+            val err = "[ERROR] ${e.message}"
+            log("SYSTEM", err)
+            fullOutput.append(err)
+            fullOutput.toString()
+        }
     }
 
     private fun createWrapperScript(instance: TunnelInstance, prefixDir: File): File {
@@ -557,12 +815,44 @@ class TunnelManager(private val context: Context) {
 
         val args = buildString {
             append("tunnel")
-            append(" --url ${config.protocol}://localhost:${config.localPort}")
+            
+            // 1. Global/Common Flags first
             append(" --no-autoupdate")
-            if (config.protocol == "https") append(" --no-tls-verify")
             if (config.logLevel != "info") append(" --loglevel ${config.logLevel}")
             if (config.region != "auto") append(" --region ${config.region}")
             if (config.enableMetrics) append(" --metrics localhost:${config.metricsPort}")
+
+            if (config.tunnelType == TunnelType.NAMED) {
+                // 2. Command
+                append(" run")
+                
+                // 3. Command-specific flags
+                if (config.credentialsFile.isNotBlank()) {
+                    // Smart path resolution for credentials
+                    val credFile = when {
+                        config.credentialsFile.startsWith("/") -> File(config.credentialsFile)
+                        File(context.filesDir, config.credentialsFile).exists() -> File(context.filesDir, config.credentialsFile)
+                        else -> File(File(context.filesDir, ".cloudflared"), config.credentialsFile)
+                    }
+                    
+                    if (!credFile.exists()) {
+                        log(instance.id, "[ERROR] Credentials file not found. Checked: ${credFile.absolutePath}")
+                    }
+                    
+                    append(" --credentials-file \"${credFile.absolutePath}\"")
+                }
+
+                // Add the local URL mapping for the named tunnel
+                // This prevents the "No ingress rules were defined" 503 error
+                if (config.protocol == "https") append(" --no-tls-verify")
+                append(" --url ${config.protocol}://localhost:${config.localPort}")
+                
+                // 4. Positional Argument (Tunnel Name/ID) MUST be last
+                append(" \"${config.tunnelName.ifBlank { config.tunnelId }}\"")
+            } else {
+                if (config.protocol == "https") append(" --no-tls-verify")
+                append(" --url ${config.protocol}://localhost:${config.localPort}")
+            }
         }
 
         val script = """#!/system/bin/sh
@@ -593,6 +883,19 @@ exec "$binaryPath" $args 2>&1
     }
 
     private fun parseTunnelUrl(instanceId: String, line: String) {
+        val inst = tunnelInstances[instanceId]?.instance
+        // Named tunnel: কানেকশন রেজিস্টার হলেই "LIVE"
+        if (inst != null && inst.config.tunnelType == TunnelType.NAMED && !inst.isConnected &&
+            (line.contains("Registered tunnel connection", true) || line.contains("Connection registered", true))
+        ) {
+            inst.isConnected = true
+            log(instanceId, "[SUCCESS] ✓ Named tunnel connected: ${inst.tunnelUrl}")
+            syncToFirebase(inst, "running", inst.tunnelUrl)
+            scope.launch(Dispatchers.Main) {
+                tunnelUrlCallback?.invoke(instanceId, inst.tunnelUrl)
+                statusCallback?.invoke(instanceId, true)
+            }
+        }
         val regex = Regex("""https://([a-z0-9-]+\.trycloudflare\.com)""")
         val match = regex.find(line) ?: return
         val url = match.value
@@ -604,11 +907,15 @@ exec "$binaryPath" $args 2>&1
 
         // Update instance
         instance.tunnelUrl = url
+        instance.isConnected = true
 
-        // Save state with new URL
+        // Save state
         saveRunningState()
 
         log(instanceId, "[SUCCESS] ✓ Tunnel URL: $url")
+
+        // Sync to Firebase
+        syncToFirebase(instance, "running", url)
 
         // Notify UI on main thread
         scope.launch(Dispatchers.Main) {
@@ -628,20 +935,21 @@ exec "$binaryPath" $args 2>&1
             }
         )
 
-        // Add to instance logs
-        tunnelInstances[instanceId]?.instance?.logs?.add(logEntry)
-
-        // Limit log size
+        // Add to instance logs (একাধিক থ্রেড থেকে আসে — সিঙ্ক্রোনাইজড)
         tunnelInstances[instanceId]?.instance?.logs?.let { logs ->
-            if (logs.size > 500) {
-                logs.removeAt(0)
+            synchronized(logs) {
+                logs.add(logEntry)
+                while (logs.size > 500) logs.removeAt(0)
             }
         }
 
         Log.d(TAG, "[$instanceId] $msg")
         scope.launch(Dispatchers.Main) {
-            globalLogCallback?.invoke(msg)
-            instanceLogCallback?.invoke(instanceId, logEntry)
+            if (instanceId == "SYSTEM") {
+                globalLogCallback?.invoke(msg)
+            } else {
+                instanceLogCallback?.invoke(instanceId, logEntry)
+            }
         }
     }
 

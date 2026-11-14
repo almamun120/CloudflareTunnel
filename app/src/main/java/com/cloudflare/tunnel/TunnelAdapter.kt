@@ -17,10 +17,12 @@ class TunnelAdapter(
     private val onSelect: (TunnelInstance) -> Unit,
     private val onDelete: (TunnelInstance) -> Unit,
     private val onCopyUrl: (TunnelInstance) -> Unit,
-    private val onQr: (TunnelInstance) -> Unit
+    private val onQr: (TunnelInstance) -> Unit,
+    private val onEdit: (TunnelInstance) -> Unit
 ) : RecyclerView.Adapter<TunnelAdapter.TunnelViewHolder>() {
 
     private val instances = mutableListOf<TunnelInstance>()
+
     var selectedId: String? = null
         set(value) {
             if (field != value) {
@@ -55,6 +57,7 @@ class TunnelAdapter(
     inner class TunnelViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val card: MaterialCardView = itemView.findViewById(R.id.cardTunnel)
         private val tvName: TextView = itemView.findViewById(R.id.tvTunnelName)
+        private val tvType: TextView = itemView.findViewById(R.id.tvTunnelType)
         private val tvConfig: TextView = itemView.findViewById(R.id.tvTunnelConfig)
         private val tvUrl: TextView = itemView.findViewById(R.id.tvTunnelUrl)
         private val tvStatus: TextView = itemView.findViewById(R.id.tvTunnelStatus)
@@ -62,6 +65,7 @@ class TunnelAdapter(
         private val btnToggle: MaterialButton = itemView.findViewById(R.id.btnTunnelToggle)
         private val btnCopy: ImageButton = itemView.findViewById(R.id.btnCopyTunnelUrl)
         private val btnQr: ImageButton = itemView.findViewById(R.id.btnTunnelQr)
+        private val btnEdit: ImageButton = itemView.findViewById(R.id.btnEditTunnel)
         private val btnDelete: ImageButton = itemView.findViewById(R.id.btnDeleteTunnel)
 
         private val green = Color.parseColor("#34D399")
@@ -70,18 +74,27 @@ class TunnelAdapter(
         private val amber = Color.parseColor("#FBBF24")
 
         fun bind(instance: TunnelInstance) {
+            val cfg = instance.config
+            val named = cfg.tunnelType == TunnelType.NAMED
             tvName.text = instance.name
-            tvConfig.text = "${instance.config.protocol}://localhost:${instance.config.localPort}"
+            tvType.text = if (named) "NAMED" else "QUICK"
+
+            tvConfig.text = buildString {
+                append("${cfg.protocol}://localhost:${cfg.localPort}")
+                if (named && cfg.hostname.isNotBlank()) append("  →  ${cfg.hostname}")
+                if (cfg.hasFirebase() && cfg.enableFirebaseSync) append("  ·  ☁ Firebase")
+            }
 
             val hasUrl = instance.tunnelUrl.isNotBlank()
+            val live = instance.isRunning && instance.isConnected && hasUrl
             val selected = instance.id == selectedId
             card.strokeColor = if (selected) orange else Color.parseColor("#26324F")
             card.strokeWidth = if (selected) 3 else 2
 
             if (instance.isRunning) {
-                tvStatus.text = if (hasUrl) "LIVE" else "CONNECTING…"
-                tvStatus.setTextColor(if (hasUrl) green else amber)
-                dot.backgroundTintList = ColorStateList.valueOf(if (hasUrl) green else amber)
+                tvStatus.text = if (live) "LIVE" else "CONNECTING…"
+                tvStatus.setTextColor(if (live) green else amber)
+                dot.backgroundTintList = ColorStateList.valueOf(if (live) green else amber)
 
                 btnToggle.text = "STOP"
                 btnToggle.setIconResource(R.drawable.ic_stop)
@@ -108,10 +121,12 @@ class TunnelAdapter(
             btnQr.isEnabled = urlActions
             btnCopy.alpha = if (urlActions) 1f else 0.3f
             btnQr.alpha = if (urlActions) 1f else 0.3f
+            btnEdit.alpha = if (instance.isRunning) 0.3f else 1f
 
             btnToggle.setOnClickListener { if (instance.isRunning) onStop(instance) else onStart(instance) }
             btnCopy.setOnClickListener { if (urlActions) onCopyUrl(instance) }
             btnQr.setOnClickListener { if (urlActions) onQr(instance) }
+            btnEdit.setOnClickListener { onEdit(instance) }
             btnDelete.setOnClickListener { onDelete(instance) }
             card.setOnClickListener { onSelect(instance) }
         }

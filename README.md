@@ -1,16 +1,18 @@
-# Cloudflare Tunnel (Android)
+# Cloudflare (com.cloudflare.tunnel)
 
-## নতুন/ঠিক করা
-- **আধুনিক ডার্ক UI** (Cloudflare-অরেঞ্জ): বাইনারি স্ট্যাটাস কার্ড, লাইভ টানেল কার্ড, কনসোল, "New tunnel" FAB।
-- লগ ডুপ্লিকেট দেখানোর বাগ (দুটো কলব্যাক) ঠিক; লগ ১০০০ লাইনে সীমাবদ্ধ (মেমোরি লিক)।
-- টানেল বন্ধ করা এখন মেইন থ্রেড ব্লক করে না (আগে UI জমত/ANR ঝুঁকি)।
-- `TunnelManager` এখন অ্যাপ-স্কোপ singleton — নোটিফিকেশনের "Stop All" সত্যিই টানেল বন্ধ করে।
-- cloudflared ডাউনলোড: TAR/XZ আংশিক-রিড বাগ (`not found in archive`), ভার্সন রেজেক্স, **ডিভাইসের CPU অনুযায়ী** (arm64/arm/x86_64) প্যাকেজ।
-- `SSL_CERT_FILE` ভুল (ডিরেক্টরি) সরানো; https অরিজিনে `--no-tls-verify`; ব্যাকগ্রাউন্ড `startService` ক্র্যাশ গার্ড।
-- নেটিভ C++ থেকে বিপজ্জনক `fork()` কোড সরানো (কখনো ব্যবহৃত হতো না); অপ্রয়োজনীয় পারমিশন (লোকেশন, ফোন স্টেট) ও `DummyVpnService` বাদ।
-- Gradle: AGP 8.7.3-এর সাথে মানানসই Gradle 8.10.2, Compose বাদ, লিন্ট abortOnError বন্ধ।
+Quick + **Named** টানেল, credentials ইমপোর্ট, **Backup/Restore**, এবং টানেলের URL **Firebase Realtime DB**-তে সিঙ্ক — সব ফিচার আগের মতোই আছে।
 
-> `targetSdk=28` ইচ্ছাকৃত — Android 10+ এ বেশি হলে অ্যাপের স্টোরেজ থেকে বাইনারি চালানো যায় না। তাই Play Store-এর জন্য নয়, সাইডলোডের জন্য।
+## এই ভার্সনে ঠিক/নতুন
+- **নতুন ডার্ক UI** (Cloudflare-অরেঞ্জ): বাইনারি কার্ড, টানেল কার্ড (QUICK/NAMED ব্যাজ, LIVE/CONNECTING), কনসোল, "New tunnel" বাটন; Add/Edit একই আধুনিক ডায়ালগ।
+- **Named tunnel**: কানেকশন রেজিস্টার হলে তবেই LIVE; URL এখন সবসময় `https://` সহ (কপি/QR ঠিক); tunnel name ফাঁকা থাকলে ID ব্যবহার; Firebase এখন Named-এও চলে।
+- **Backup/Restore**: এখন `.cloudflared` ফোল্ডারের সাথে **সব টানেল কনফিগও** (`tunnels.json`) ব্যাকআপ হয়, রিস্টোরে মার্জ হয়। রিস্টোরে **Zip-Slip** (../ পাথ) ও zip-bomb প্রতিরোধ। Firebase key ব্যাকআপে রাখা ঐচ্ছিক।
+- **Firebase**: `PATCH` Android-এ নির্ভরযোগ্য নয় → `X-HTTP-Method-Override`; auth key URL-encode।
+- **সিকিউরিটি**: tunnel name/hostname/credentials ফাইলে শেল-ইনজেকশন আটকানো (শুধু নিরাপদ অক্ষর); ইউজার-CA ট্রাস্ট বাদ; অপ্রয়োজনীয় লোকেশন/ফোন পারমিশন ও VPN সার্ভিস বাদ।
+- **CI কম্পাইল এরর** (`Process.pid()` unresolved) ঠিক।
+- টানেল বন্ধ করা নন-ব্লকিং; `TunnelManager` অ্যাপ-স্কোপ (নোটিফিকেশনের "Stop All" কাজ করে); TAR/XZ আংশিক-রিড বাগ, ভার্সন রেজেক্স, CPU আর্কিটেকচার-ভিত্তিক ডাউনলোড; লগ ১০০০ লাইনে সীমিত; `SSL_CERT_FILE` ভুল সরানো; https অরিজিনে `--no-tls-verify`; নেটিভ `fork()` কোড সরানো।
+- Gradle: Gradle 8.10.2 ↔ AGP 8.7.3, Compose বাদ।
+
+> `targetSdk=28` ইচ্ছাকৃত — Android 10+ এ বেশি হলে অ্যাপের স্টোরেজ থেকে বাইনারি চালানো যায় না। এটা সাইডলোডের জন্য।
 
 ## GitHub Actions (অটো বিল্ড)
 
@@ -32,4 +34,3 @@ Repo → Settings → Secrets and variables → Actions → এই ৪টা য
 সিক্রেট না দিলে workflow প্রতি রানে একটা অস্থায়ী কী বানিয়ে সাইন করে (APK ইনস্টল হবে, তবে আলাদা কী-র APK-এর ওপর আপডেট হবে না)।
 
 ভার্সন বদলাতে `gradle.properties`-এর `APP_VERSION_NAME` এডিট করুন; `versionCode` = CI run number।
-
